@@ -1,4 +1,7 @@
-from astrbot_plugin_web_searcher_pro.formatters.search_formatter import format_image_results, format_search_result
+from astrbot_plugin_web_searcher_pro.formatters.search_formatter import (
+    format_image_results,
+    format_search_result,
+)
 from astrbot_plugin_web_searcher_pro.search_models import SearchResult, SearchResultItem
 
 

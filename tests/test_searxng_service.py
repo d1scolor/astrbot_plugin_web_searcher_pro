@@ -1,9 +1,10 @@
 import pytest
-
 from astrbot_plugin_web_searcher_pro.services.searxng_service import SearxngService
 
 
-def _text_result(title: str, url: str, *, content: str = "", engine: str = "duckduckgo", score: float = 0.0) -> dict:
+def _text_result(
+    title: str, url: str, *, content: str = "", engine: str = "duckduckgo", score: float = 0.0
+) -> dict:
     return {
         "title": title,
         "url": url,
@@ -254,10 +255,7 @@ async def test_image_search_keeps_image_pipeline_separate_from_text_ranking():
     )
 
     assert [params["categories"] for _, params in client.calls] == ["images"]
-    assert client.head_calls == [
-        "https://images.example/docs.png",
-        "https://images.example/large.png",
-    ]
+    assert client.head_calls == []
     assert [item.img_src for item in result.results] == [
         "https://images.example/large.png",
         "https://images.example/docs.png",
@@ -330,7 +328,14 @@ async def test_search_returns_configuration_error_for_403_response():
 async def test_search_falls_back_when_result_item_has_invalid_score_value():
     client = DummyHttpClient(
         {
-            "it": (200, {"results": [{"title": "Broken item", "url": "https://broken.example", "score": "not-a-number"}]}),
+            "it": (
+                200,
+                {
+                    "results": [
+                        {"title": "Broken item", "url": "https://broken.example", "score": "not-a-number"}
+                    ]
+                },
+            ),
             "technical": [
                 _text_result("Python docs", "https://docs.python.org/3/library/asyncio.html", score=0.6),
             ],

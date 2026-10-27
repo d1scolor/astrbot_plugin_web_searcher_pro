@@ -1,6 +1,5 @@
 from astrbot_plugin_web_searcher_pro.services.search_strategy import get_search_strategy
 
-
 EXPECTED_STRATEGIES = {
     "general": ("general", (), "default", "detect_query"),
     "technical": ("it", ("technical", "general"), "technical", "detect_query"),

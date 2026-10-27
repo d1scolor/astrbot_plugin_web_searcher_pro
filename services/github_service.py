@@ -2,14 +2,14 @@ import base64
 from typing import Mapping
 
 from ..errors import ExternalServiceError
-from .http_client import HttpClient
 from ..utils.url_helpers import extract_github_repo
+from .http_client import HttpClient
 
 
 class GitHubService:
     def __init__(self, http_client: HttpClient, token: str = ""):
         self.http_client = http_client
-        self.token = token
+        self.token = ""  # Never reuse administrator credentials for chat-controlled lookups.
 
     @property
     def headers(self) -> Mapping[str, str]:

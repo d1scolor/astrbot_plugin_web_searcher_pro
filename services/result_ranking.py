@@ -2,7 +2,6 @@ from urllib.parse import urlparse
 
 from ..search_models import SearchResultItem
 
-
 _PROFILE_PATTERNS = {
     "technical": (
         ("docs.python.org", 0.5),

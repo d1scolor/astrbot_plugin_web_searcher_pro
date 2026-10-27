@@ -1,54 +1,43 @@
-import os
-from dataclasses import dataclass
-from typing import Mapping, Any
-
+from dataclasses import dataclass, field
+from typing import Any, Mapping
 
 DEFAULT_SEARXNG_API_URL = "http://127.0.0.1:8080"
 DEFAULT_REQUEST_TIMEOUT = 15
-DEFAULT_IMAGE_RESULT_LIMIT = 12
-DEFAULT_IMAGE_CANDIDATE_LIMIT = 120
-DEFAULT_WEB_SEARCH_ENABLED = False
-DEFAULT_IMAGE_DELIVERY_MODE = "model"
-IMAGE_DELIVERY_MODES = {"model", "user", "both"}
+DEFAULT_IMAGE_RESULT_LIMIT = 5
+DEFAULT_IMAGE_CANDIDATE_LIMIT = 10
 
 
 @dataclass(frozen=True)
 class PluginConfig:
     searxng_api_url: str = DEFAULT_SEARXNG_API_URL
-    enable_random_image: bool = False
-    enable_image_title: bool = True
-    github_token: str = ""
     request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     image_result_limit: int = DEFAULT_IMAGE_RESULT_LIMIT
     image_candidate_limit: int = DEFAULT_IMAGE_CANDIDATE_LIMIT
-    default_web_search_enabled: bool = DEFAULT_WEB_SEARCH_ENABLED
-    image_delivery_mode: str = DEFAULT_IMAGE_DELIVERY_MODE
-    proxy: str | None = None
+    guard_enabled: bool = False
+    guard_api_url: str = ""
+    guard_auth_token: str = field(default="", repr=False)
+    guard_timeout: int = 20
+    # Compatibility fields cannot enable old unsafe behaviors.
+    enable_random_image: bool = False
+    enable_image_title: bool = True
+    github_token: str = ""
+    default_web_search_enabled: bool = False
+    image_delivery_mode: str = "model"
+    proxy: None = None
 
     @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "PluginConfig":
-        image_delivery_mode = str(mapping.get("image_delivery_mode", DEFAULT_IMAGE_DELIVERY_MODE)).strip().lower()
-        if image_delivery_mode not in IMAGE_DELIVERY_MODES:
-            image_delivery_mode = DEFAULT_IMAGE_DELIVERY_MODE
-
+    def from_mapping(cls, mapping: Mapping[str, Any]):
         return cls(
             searxng_api_url=str(mapping.get("searxng_api_url", DEFAULT_SEARXNG_API_URL)).rstrip("/"),
-            enable_random_image=bool(mapping.get("enable_random_image", False)),
-            enable_image_title=bool(mapping.get("enable_image_title", True)),
-            github_token=str(mapping.get("github_token", "")).strip(),
-            request_timeout=max(3, int(mapping.get("request_timeout", DEFAULT_REQUEST_TIMEOUT))),
-            image_result_limit=max(1, int(mapping.get("image_result_limit", DEFAULT_IMAGE_RESULT_LIMIT))),
-            image_candidate_limit=max(
-                10,
-                int(mapping.get("image_candidate_limit", DEFAULT_IMAGE_CANDIDATE_LIMIT)),
-            ),
-            default_web_search_enabled=bool(
-                mapping.get("default_web_search_enabled", DEFAULT_WEB_SEARCH_ENABLED)
-            ),
-            image_delivery_mode=image_delivery_mode,
-            proxy=os.environ.get("https_proxy") or os.environ.get("http_proxy"),
+            request_timeout=max(3, min(int(mapping.get("request_timeout", 15)), 30)),
+            image_result_limit=max(1, min(int(mapping.get("image_result_limit", 5)), 10)),
+            image_candidate_limit=max(1, min(int(mapping.get("image_candidate_limit", 10)), 20)),
+            guard_enabled=mapping.get("guard_enabled", False) is True,
+            guard_api_url=str(mapping.get("guard_api_url", "")).strip().rstrip("/"),
+            guard_auth_token=str(mapping.get("guard_auth_token", "")).strip(),
+            guard_timeout=max(1, min(int(mapping.get("guard_timeout", 20)), 60)),
         )
 
     @classmethod
-    def from_astrbot(cls, config: Mapping[str, Any]) -> "PluginConfig":
+    def from_astrbot(cls, config):
         return cls.from_mapping(config)

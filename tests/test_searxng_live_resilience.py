@@ -1,5 +1,4 @@
 import pytest
-
 from astrbot_plugin_web_searcher_pro.errors import ExternalServiceError
 from astrbot_plugin_web_searcher_pro.services.http_client import HttpClient
 from astrbot_plugin_web_searcher_pro.services.searxng_service import SearxngService

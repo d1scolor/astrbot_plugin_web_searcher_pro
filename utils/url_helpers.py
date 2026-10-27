@@ -1,7 +1,6 @@
 import re
 from urllib.parse import urlparse
 
-
 GITHUB_REPO_PATH = re.compile(r"^/([\w.-]+/[\w.-]+)")
 GITHUB_CLONE_PATTERN = re.compile(r"^(?:git@github\.com:|https://github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?$")
 
@@ -23,7 +22,7 @@ def extract_github_repo(value: str) -> str | None:
 
     if is_http_url(value):
         parsed = urlparse(value)
-        if "github.com" not in parsed.netloc:
+        if parsed.hostname != "github.com":
             return None
         match = GITHUB_REPO_PATH.match(parsed.path)
         return match.group(1) if match else None

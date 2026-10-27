@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from astrbot_plugin_web_searcher_pro.errors import ExternalServiceError
 from astrbot_plugin_web_searcher_pro.services.http_client import HttpClient
 
@@ -22,7 +21,12 @@ class TimeoutSession:
 
 @pytest.mark.asyncio
 async def test_http_client_wraps_timeout_as_external_service_error(monkeypatch):
-    monkeypatch.setattr("astrbot_plugin_web_searcher_pro.services.http_client.aiohttp.ClientSession", TimeoutSession)
+    monkeypatch.setattr(
+        "astrbot_plugin_web_searcher_pro.services.http_client.aiohttp.ClientSession", TimeoutSession
+    )
+    monkeypatch.setattr(
+        "astrbot_plugin_web_searcher_pro.services.http_client.aiohttp.TCPConnector", lambda **kwargs: None
+    )
     client = HttpClient(timeout=1)
 
     with pytest.raises(ExternalServiceError):

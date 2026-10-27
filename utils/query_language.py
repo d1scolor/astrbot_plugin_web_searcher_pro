@@ -5,11 +5,7 @@ def _is_kana(char: str) -> bool:
 
 def _is_hangul(char: str) -> bool:
     codepoint = ord(char)
-    return (
-        0x1100 <= codepoint <= 0x11FF
-        or 0x3130 <= codepoint <= 0x318F
-        or 0xAC00 <= codepoint <= 0xD7AF
-    )
+    return 0x1100 <= codepoint <= 0x11FF or 0x3130 <= codepoint <= 0x318F or 0xAC00 <= codepoint <= 0xD7AF
 
 
 def _is_han(char: str) -> bool:
@@ -35,7 +31,9 @@ def detect_query_language(query: str) -> str:
         return "en" if any(char.isalpha() for char in text) else "auto"
 
     han_count = sum(1 for char in text if _is_han(char))
-    ascii_word_count = sum(1 for token in text.split() if token.isascii() and any(char.isalpha() for char in token))
+    ascii_word_count = sum(
+        1 for token in text.split() if token.isascii() and any(char.isalpha() for char in token)
+    )
 
     if han_count:
         if ascii_word_count <= 1:

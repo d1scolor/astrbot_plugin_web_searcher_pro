@@ -1,5 +1,5 @@
-from astrbot_plugin_web_searcher_pro.services.image_service import parse_resolution, deduplicate_image_results
 from astrbot_plugin_web_searcher_pro.search_models import SearchResultItem
+from astrbot_plugin_web_searcher_pro.services.image_service import deduplicate_image_results, parse_resolution
 
 
 def test_parse_resolution_supports_lowercase_x():

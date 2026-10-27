@@ -1,55 +1,50 @@
 {
-    "searxng_api_url": {
-        "type": "string",
-        "description": "SearXNG API地址",
-        "default": "http://127.0.0.1:8080",
-        "hint": "需要包含http://或https://前缀"
-    },
-    "enable_random_image": {
-        "type": "bool",
-        "description": "开启随机图片",
-        "default": false,
-        "hint": "如果开启则只显示结果中一张随机图片，关闭则显示多张筛选后的图片"
-    },
-    "enable_image_title": {
-        "type": "bool",
-        "description": "开启图片标题",
-        "default": true
-    },
-    "request_timeout": {
-        "type": "int",
-        "description": "网络请求超时时间（秒）",
-        "default": 15,
-        "hint": "统一用于 SearXNG、GitHub、网页抓取等外部请求"
-    },
-    "image_result_limit": {
-        "type": "int",
-        "description": "图片搜索最终返回数量上限",
-        "default": 12,
-        "hint": "插件会先筛选可访问图片，再按分辨率和得分排序后取前 N 张"
-    },
-    "image_candidate_limit": {
-        "type": "int",
-        "description": "图片搜索预筛选候选数量",
-        "default": 120,
-        "hint": "候选越大筛选更充分，但也会增加请求开销"
-    },
-    "default_web_search_enabled": {
-        "type": "bool",
-        "description": "启动时默认开启网页搜索",
-        "default": false,
-        "hint": "开启后插件加载时会自动启用网页搜索工具，避免每次手动执行 /websearch on"
-    },
-    "image_delivery_mode": {
-        "type": "string",
-        "description": "图片搜索结果发送模式",
-        "default": "model",
-        "hint": "model=只返回图片链接和摘要给模型；user=发送图片给用户并返回摘要给模型；both=同 user，保留给兼容明确双通道语义"
-    },
-    "github_token": {
-        "type": "string",
-        "description": "GitHub token",
-        "default": "",
-        "hint": "https://github.com/settings/personal-access-tokens"
-    }
+  "searxng_api_url": {
+    "type": "string",
+    "description": "SearXNG API地址",
+    "default": "http://127.0.0.1:8080",
+    "hint": "需要包含http://或https://前缀"
+  },
+  "request_timeout": {
+    "type": "int",
+    "description": "网络请求超时时间（秒）",
+    "default": 15,
+    "hint": "统一用于 SearXNG、GitHub、网页抓取等外部请求"
+  },
+  "image_result_limit": {
+    "type": "int",
+    "description": "图片搜索最终返回数量上限",
+    "default": 5,
+    "hint": "Metadata results only; maximum 10. Images are not automatically downloaded."
+  },
+  "image_candidate_limit": {
+    "type": "int",
+    "description": "图片搜索预筛选候选数量",
+    "default": 10,
+    "hint": "Maximum 20 metadata candidates. No HEAD probes or image downloads."
+  },
+  "guard_enabled": {
+    "type": "bool",
+    "description": "Enable Prompt Guard screening",
+    "default": false,
+    "hint": "Optional. Disabled results are explicitly marked unscanned. Enabled screening fails closed."
+  },
+  "guard_api_url": {
+    "type": "string",
+    "description": "Prompt Guard base URL",
+    "default": "",
+    "hint": "Administrator-configured HTTP(S) base URL, without /v1/scan or credentials."
+  },
+  "guard_auth_token": {
+    "type": "string",
+    "description": "Prompt Guard bearer token",
+    "default": "",
+    "hint": "Stored in local AstrBot configuration. Do not include in logs or bug reports."
+  },
+  "guard_timeout": {
+    "type": "int",
+    "description": "Prompt Guard timeout in seconds",
+    "default": 20,
+    "hint": "1–60. Failures withhold external content when screening is enabled."
+  }
 }

@@ -14,7 +14,9 @@ class AurService:
             return "Search query must be at least 2 characters long."
 
         try:
-            status, data = await self.http_client.get_json(self.SEARCH_URL, params={"arg": query, "by": "name"})
+            status, data = await self.http_client.get_json(
+                self.SEARCH_URL, params={"arg": query, "by": "name"}
+            )
         except ExternalServiceError:
             return "AUR search failed due to a network error."
         if status != 200:

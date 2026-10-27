@@ -1,117 +1,118 @@
-# WebSearcherPro 插件
+# Guarded SearXNG Search for AstrBot
 
-基于 SearXNG 的 AstrBot Web 检索插件，支持网页搜索、图片搜索、网页正文抓取、GitHub 仓库查询和 AUR 包检索。
+Fork of [WebSearcherPro by buding](https://github.com/zouyonghe/astrbot_plugin_web_searcher_pro),
+maintained here with public-network-only page fetching and optional Prompt Guard screening.
+Target: AstrBot 4.29.3, Python 3.11 or newer. Version 1.2.0.
 
-## LLM 工具命名
+## Configure
 
-为避免与其他插件发生 `llm_tool` 名称碰撞，插件导出的工具名已统一改为 `searxng_*` 前缀：
+Install/update from **this fork**:
 
-- `searxng_web_search_general`
-- `searxng_web_search_images`
-- `searxng_web_search_videos`
-- `searxng_web_search_news`
-- `searxng_web_search_science`
-- `searxng_web_search_music`
-- `searxng_web_search_technical`
-- `searxng_web_search_academic`
-- `searxng_web_search_map`
-- `searxng_web_search_files`
-- `searxng_web_search_social`
-- `searxng_web_search_books`
-- `searxng_web_fetch_url`
-- `searxng_github_search`
+```text
+https://github.com/d1scolor/astrbot_plugin_web_searcher_pro
+```
 
-## 架构
+Remove/disable the original search integration so only this fork's search tools are
+available. Existing SearXNG endpoint settings carry over. The plugin can load before
+Prompt Guard is configured; it does not call services at startup.
 
-重构后代码按职责拆分：
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `searxng_api_url` | Local endpoint placeholder | Your administrator-configured SearXNG base URL, reachable from AstrBot's container. JSON must be enabled. |
+| `guard_enabled` | `false` | Optional screening. Enable after configuring the endpoint and token. |
+| `guard_api_url` | Empty | Prompt Guard base URL, without `/v1/scan`. |
+| `guard_auth_token` | Empty | Bearer token stored in AstrBot's local configuration. Never commit or share it. |
+| `guard_timeout` | 20 | Screening deadline, including admission wait; range 1–60 seconds. |
+| `request_timeout` | 15 | Network deadline; range 3–30 seconds. |
+| `image_result_limit` | 5 | Returned metadata entries; hard maximum 10. |
+| `image_candidate_limit` | 10 | Metadata candidates considered; hard maximum 20. |
 
-- `main.py`：AstrBot 插件入口、命令注册、工具绑定
-- `config.py`：配置加载与默认值
-- `services/`：SearXNG、GitHub、网页抓取、图片处理、AUR、HTTP 客户端
-- `formatters/`：统一文本格式化
-- `utils/`：URL 解析等纯函数
-- `tests/`：可在 `astrbot` 环境中运行的单测
+Use the active bot/persona's tool allowlist to enable only the required tools. Keep
+AstrBot's separate built-in search disabled if all searches must pass this integration.
+This plugin does not modify global configuration or activate/deactivate tools.
+`/websearch` now only reports configuration; on/off arguments cannot change settings.
+Older `default_web_search_enabled`, image-delivery and GitHub-token settings are ignored.
+Administrator GitHub credentials are never used for chat-controlled repository queries.
 
-## 配置
+## Behavior
 
-可参考 `https://docs.openwebui.com/tutorials/web-search/searxng` 部署 SearXNG。
+The existing `searxng_*` search categories, page-fetch and public GitHub lookup tools
+are retained. Search queries are limited to 2000 characters. Image search returns URLs,
+titles and descriptions to the model; it never downloads, HEAD-probes or sends candidate
+images to users. Another tool can select/import a few candidates as needed. Image engines
+follow the instance's configured category rather than a hardcoded Google/Bing allowlist.
 
-当前支持的关键配置：
+All external text returned by the plugin's LLM tools and external-content commands
+passes through one response boundary. This includes search results, image metadata,
+extracted pages, GitHub descriptions/READMEs, AUR descriptions and external error text.
+The complete formatted result is scanned as one document; a detection withholds the
+whole response. Token-window scanning is performed by the guard server. Content is not
+silently truncated to evade scanning; responses over 120,000 UTF-8 bytes are withheld.
 
-- `searxng_api_url`：SearXNG API 地址
-- `request_timeout`：统一网络请求超时秒数
-- `enable_random_image`：图片搜索是否只返回一张随机图
-- `enable_image_title`：图片结果是否附带标题
-- `image_result_limit`：图片搜索最终返回数量上限
-- `image_candidate_limit`：图片搜索预筛选候选数量
-- `image_delivery_mode`：图片搜索结果发送模式，`model` 只返回图片链接和摘要给模型，`user`/`both` 会同时直接发送图片给用户
-- `default_web_search_enabled`：插件启动时自动开启网页搜索能力
-- `github_token`：提高 GitHub API 配额
+Tool output is a JSON envelope:
 
-## 使用方法
+```json
+{"screening":"accepted","trusted":false,"text":"External result text"}
+```
 
-1. 安装插件并配置 `searxng_api_url`。
-2. 使用 `/websearch on` 开启网页搜索工具，或在配置中打开 `default_web_search_enabled` 让插件启动时自动开启。
-3. 通过命令或自然语言触发对应能力。
+| `screening` | Meaning |
+| --- | --- |
+| `disabled` | Guard is off. Text is returned explicitly unscanned. |
+| `accepted` | Guard returned a matching benign result below its reported threshold. Content remains untrusted data. |
+| `blocked` | Suspected injection; no original content is returned. |
+| `unavailable` | Guard/configuration/network failure or size limit; no original content is returned. |
 
-## 指令列表
+When screening is enabled, bad authentication, redirects, timeouts, HTTP errors,
+malformed JSON, missing/duplicate/mismatched results, invalid scores and unconfirmed
+chunk scanning all fail closed. There is no implicit fallback to unscanned output.
+No guard request includes conversation history, persona instructions or credentials
+inside the text payload; only the tool result is scanned. As with any fetched content,
+a page could itself contain sensitive information. Query/URL logging remains enabled
+as in upstream, and AstrBot may independently log tool calls/results.
 
-| 指令/工具 | 参数 | 示例 | 说明 |
-|---|---|---|---|
-| `/websearch` | `on/off` 或 空 | `/websearch on` | 开启/关闭网页搜索能力 |
-| `searxng_web_search_general` | `关键词` | `搜索 Python asyncio` | 通用网页搜索 |
-| `searxng_web_search_images` | `关键词` | `搜索图片 晴空塔` | 图片搜索 |
-| `searxng_web_search_videos` | `关键词` | `搜索视频 哆啦A梦` | 视频搜索 |
-| `searxng_web_search_news` | `关键词` | `搜索新闻 冬奥会` | 新闻搜索 |
-| `searxng_web_search_science` | `关键词` | `搜索科学 黑洞` | 科学搜索 |
-| `searxng_web_search_technical` | `关键词` | `搜索技术 Python asyncio` | 技术搜索，优先开发者结果并自动回退 |
-| `searxng_web_search_academic` | `关键词` | `搜索学术 MLP` | 学术搜索 |
-| `searxng_web_search_map` | `地点/关键词` | `搜索地图 上海迪士尼` | 地图搜索 |
-| `searxng_web_search_files` | `关键词` | `搜索文件 Python PDF 教程` | 文件搜索 |
-| `searxng_web_search_social` | `关键词` | `搜索社交 Mastodon OpenAI` | 社交内容搜索 |
-| `searxng_web_search_books` | `关键词` | `搜索图书 深度学习` | 图书搜索 |
-| `searxng_web_fetch_url` | `URL` | `获取 https://example.com` | 提取网页正文或 GitHub 仓库内容 |
-| `/github` | `URL/关键词` | `/github flask` | 搜索 GitHub 仓库 |
-| `searxng_github_search` | `URL/关键词` | `搜索 GitHub owner/repo` | GitHub 仓库工具 |
-| `/aur` | `包名/关键词` | `/aur firefox` | 查询 AUR 包 |
+## Network boundary
 
-## 搜索行为
+Public fetching is restricted to HTTP(S) on ports 80/443, without embedded credentials.
+Loopback, private, link-local, reserved/multicast and transition addresses are rejected.
+DNS records are checked by the connector resolver and cached DNS is disabled; redirects
+are followed manually and every destination is checked. Proxies and environment proxy
+inheritance are disabled because a remote resolver could bypass this policy.
 
-- 文本搜索会根据查询语言自动推断搜索语言；混合或不明确的查询会回退为 `auto`。
-- `searxng_web_search_technical` 会优先使用更适合开发者内容的分类，并在结果不足时按策略自动回退，提升技术文档与资料命中率。
-- `searxng_web_search_map`、`searxng_web_search_files`、`searxng_web_search_social`、`searxng_web_search_books` 分别用于地图、文件、社交内容和图书搜索。
+Only two administrator-configured infrastructure routes may use private networks:
 
-## 开发与测试
+- SearXNG: GET to the configured base's `/search` path, without redirects.
+- Prompt Guard: POST to the configured base's `/v1/scan`, without redirects. The bearer
+  token is sent only on this connection.
 
-建议在 `mamba` 的 `astrbot` 环境内执行：
+Neither endpoint can be supplied or changed through model tool arguments. Public and
+infrastructure clients are separate. HTTP responses are limited to 2 MiB and requests
+have concurrency/deadline limits. These are application-layer restrictions, not an OS
+firewall or a guarantee about unrelated plugins and tools.
 
-- 安装运行依赖：`pip install -r requirements.txt`
-- 安装测试依赖：`pip install -r requirements-dev.txt`
-- 运行测试：`pytest -q`
+The guard screens **text only**, including image metadata. This release does not OCR
+images or protect other plugins' image/vision paths. Accepted results never authorize
+shell access, configuration changes, private-network requests or other privileged actions.
 
-## 注意事项
+## Validate on your deployment
 
-1. GitHub、网页抓取、AUR 等能力依赖外部服务，建议配置合理超时与代理。
-2. 图片搜索会先做可访问性校验，再按分辨率和搜索得分排序。
-3. 若启用 `enable_random_image`，图片模式只返回一张结果。
-4. `searxng_web_fetch_url` 对客户端渲染页面会回退为标题和元信息；如果站点内容完全依赖浏览器执行 JavaScript，仍建议搭配带渲染能力的抓取工具。
+1. Set SearXNG and test an ordinary web/image search with the guard off; results must
+   report `disabled`. No reference images should be posted to the chat automatically.
+2. Configure Prompt Guard URL/token, enable it, save and reload.
+3. Search again; the tool response should report `accepted` for ordinary content.
+4. Temporarily enter an invalid guard token, reload and search: the response must be
+   `unavailable`, with no search text. Restore the token locally afterward.
+5. Request a localhost/private page fetch: it must be blocked without a target request.
+6. Check the actual tool inventory. The plugin cannot guard a separate built-in search,
+   another fetch plugin, an MCP server, or content already in conversation history.
 
-## 故障排查
+Automated tests use fake HTTP plus local mock servers. No test uses production tokens,
+performs internal-network probes or sends QQ messages. The deployed guard's unauthenticated
+health endpoint was reachable during development; authenticated deployment scanning still
+requires local configuration and validation.
 
-### 1. SearXNG 返回 403
-
-- 先直接测试 JSON 接口：`curl "http://127.0.0.1:8080/search?q=test&categories=general&format=json"`
-- 如果浏览器能打开首页，但 `format=json` 返回 403，通常是 SearXNG 部署或反代配置问题，不是插件解析问题。
-- 检查 `searxng_api_url` 是否和实际协议、端口一致，尤其注意 Caddy/Nginx 强制 HTTPS 跳转、容器端口映射、以及 `search` 路径是否允许匿名访问 JSON。
-
-### 2. 自然语言被误判成 `/aur`
-
-- 如果你启用了 `astrbot_plugin_command_router` 这类自然语言指令路由插件，它会同时参考插件描述和命令描述做匹配。
-- 当前版本已经给 `/websearch`、`/aur`、`/github` 增加了更明确的命令说明，降低把普通资料检索误判成 AUR 包查询的概率。
-- 普通联网搜索优先让 LLM 使用 `searxng_web_search_*` 和 `searxng_web_fetch_url` 这些工具，不建议把 `/aur` 当成自然语言搜索入口。
-
-## 问题反馈
-
-如出现问题，请通过以下途径联系：
-QQ: 1259085392，或者提交 GitHub Issue：
-[WebSearcherPro 仓库](https://github.com/zouyonghe/astrbot_plugin_web_searcher_pro/issues)
+```sh
+uv sync --group dev
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
+```

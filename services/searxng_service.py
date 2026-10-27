@@ -7,6 +7,7 @@ from ..search_models import SearchResult, SearchResultItem
 from ..utils.query_language import detect_query_language
 from .http_client import HttpClient
 from .image_service import rank_image_results
+from .network_policy import validate_public_url
 from .result_ranking import rank_text_results
 from .search_strategy import get_search_strategy
 
@@ -49,13 +50,33 @@ def filter_results(
 
 
 class SearxngService:
-    def __init__(self, http_client: HttpClient, base_url: str, *, image_candidate_limit: int = 120, image_result_limit: int = 12):
+    def __init__(
+        self,
+        http_client: HttpClient,
+        base_url: str,
+        *,
+        image_candidate_limit: int = 10,
+        image_result_limit: int = 5,
+    ):
         self.http_client = http_client
         self.base_url = base_url.rstrip("/")
-        self.image_candidate_limit = image_candidate_limit
-        self.image_result_limit = image_result_limit
+        self.image_candidate_limit = max(1, min(image_candidate_limit, 20))
+        self.image_result_limit = max(1, min(image_result_limit, 10))
 
-    async def search(self, query: str, *, category: str = "general", limit: int = 5, engines: list[str] | None = None) -> SearchResult:
+    async def search(self, query: str, *, category="general", limit=5, engines=None):
+        if not isinstance(query, str) or not query.strip() or len(query) > 2000:
+            return SearchResult(error_message="Search query must contain 1–2000 characters.")
+        try:
+            async with asyncio.timeout(getattr(self.http_client, "timeout", 15)):
+                return await self._search(
+                    query, category=category, limit=max(1, min(limit, 10)), engines=engines
+                )
+        except TimeoutError:
+            return SearchResult(error_message="Search deadline exceeded.")
+
+    async def _search(
+        self, query: str, *, category: str = "general", limit: int = 5, engines: list[str] | None = None
+    ) -> SearchResult:
         if category != "images":
             return await self._search_text(query, category=category, limit=limit, engines=engines)
 
@@ -97,7 +118,9 @@ class SearxngService:
         except (TypeError, ValueError):
             return SearchResult()
 
-    async def _search_text(self, query: str, *, category: str, limit: int, engines: list[str] | None = None) -> SearchResult:
+    async def _search_text(
+        self, query: str, *, category: str, limit: int, engines: list[str] | None = None
+    ) -> SearchResult:
         strategy = get_search_strategy(category)
         requested_language = detect_query_language(query)
 
@@ -130,13 +153,23 @@ class SearxngService:
 
         return SearchResult()
 
-    async def _filter_image_results(self, result: SearchResult, engines: list[str] | None = None, limit: int | None = None) -> SearchResult:
+    async def _filter_image_results(
+        self, result: SearchResult, engines: list[str] | None = None, limit: int | None = None
+    ) -> SearchResult:
         items = list(result.results)
         if engines:
             items = [item for item in items if item.engine in engines]
         items = [item for item in items if item.img_src][: self.image_candidate_limit]
-        checks = await asyncio.gather(*(self.http_client.head_ok(item.img_src) for item in items))
-        valid_items = [item for item, is_valid in zip(items, checks) if is_valid]
+        valid_items = []
+        for item in items:
+            try:
+                validate_public_url(item.img_src)
+                if item.url:
+                    validate_public_url(item.url)
+                valid_items.append(item)
+            except ExternalServiceError:
+                continue
+        # Metadata only: do not contact untrusted candidates to test availability.
         ranked = rank_image_results(valid_items)
         result_limit = self.image_result_limit if limit is None else min(limit, self.image_result_limit)
         return SearchResult(results=ranked[:result_limit])

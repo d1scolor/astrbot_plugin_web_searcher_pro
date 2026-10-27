@@ -1,5 +1,4 @@
 import pytest
-
 from astrbot_plugin_web_searcher_pro.services.web_fetch_service import WebFetchService
 
 

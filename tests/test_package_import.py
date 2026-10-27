@@ -5,7 +5,6 @@ import sys
 import types
 from pathlib import Path
 
-
 MAIN_MODULE_NAME = "data.plugins.astrbot_plugin_web_searcher_pro.main"
 
 
@@ -43,13 +42,13 @@ def _import_plugin_main(monkeypatch):
     ]:
         monkeypatch.delitem(sys.modules, module_name, raising=False)
 
-    astrbot = _stub_module(monkeypatch, "astrbot")
+    _stub_module(monkeypatch, "astrbot")
     api = _stub_module(monkeypatch, "astrbot.api")
     event = _stub_module(monkeypatch, "astrbot.api.event")
-    event_filter = _stub_module(monkeypatch, "astrbot.api.event.filter")
+    _stub_module(monkeypatch, "astrbot.api.event.filter")
     star = _stub_module(monkeypatch, "astrbot.api.star")
-    core = _stub_module(monkeypatch, "astrbot.core")
-    core_message = _stub_module(monkeypatch, "astrbot.core.message")
+    _stub_module(monkeypatch, "astrbot.core")
+    _stub_module(monkeypatch, "astrbot.core.message")
     components = _stub_module(monkeypatch, "astrbot.core.message.components")
     message_event_result = _stub_module(monkeypatch, "astrbot.core.message.message_event_result")
     aiohttp = _stub_module(monkeypatch, "aiohttp")
@@ -70,23 +69,28 @@ def _import_plugin_main(monkeypatch):
     def register(*args, **kwargs):
         def decorator(obj):
             return obj
+
         return decorator
 
     def llm_tool(*args, **kwargs):
         def decorator(func):
             return func
+
         return decorator
 
     def command(*args, **kwargs):
         def decorator(func):
             return func
+
         return decorator
 
     class DummyLogger:
         def info(self, *args, **kwargs):
             pass
+
         def warning(self, *args, **kwargs):
             pass
+
         def error(self, *args, **kwargs):
             pass
 
@@ -182,7 +186,7 @@ def test_llm_tools_keep_parameter_docstrings(monkeypatch):
 def test_command_handlers_keep_docstrings_for_router_metadata(monkeypatch):
     module = _import_plugin_main(monkeypatch)
     expected_phrases = {
-        "websearch": "Only use this command when the user explicitly wants to enable or disable web search.",
+        "websearch": "Report search configuration.",
         "search_aur": "Only use this command when the user explicitly asks for an Arch Linux or AUR package.",
         "github_search": "Only use this command when the user explicitly asks to run the /github command.",
     }
@@ -220,74 +224,24 @@ class DummyContext:
         self.deactivated_tools.append(tool_name)
 
 
-def test_set_websearch_status_toggles_all_websearch_tools(monkeypatch):
+def test_chat_toggle_cannot_modify_global_config(monkeypatch):
+    from astrbot_plugin_web_searcher_pro.services.prompt_guard import PromptGuard
+
     module = _import_plugin_main(monkeypatch)
     plugin = object.__new__(module.WebSearcherPro)
     plugin.context = DummyContext()
+    plugin.guard = PromptGuard()
+    event = types.SimpleNamespace(plain_result=lambda text: text)
 
-    plugin._set_websearch_status(True)
+    async def invoke():
+        return [message async for message in plugin.websearch(event, "on")]
 
-    expected_tools = {
-        "searxng_web_search_general",
-        "searxng_web_search_images",
-        "searxng_web_search_videos",
-        "searxng_web_search_news",
-        "searxng_web_search_science",
-        "searxng_web_search_music",
-        "searxng_web_search_technical",
-        "searxng_web_search_academic",
-        "searxng_web_search_map",
-        "searxng_web_search_files",
-        "searxng_web_search_social",
-        "searxng_web_search_books",
-        "searxng_web_fetch_url",
-    }
-
-    assert plugin.context.config["provider_settings"]["web_search"] is True
-    assert plugin.context.config.saved is True
-    assert set(plugin.context.activated_tools) == expected_tools
-    assert len(plugin.context.activated_tools) == len(expected_tools)
-
-    plugin._set_websearch_status(False)
-
+    messages = asyncio.run(invoke())
+    assert "cannot change global settings" in messages[0]
     assert plugin.context.config["provider_settings"]["web_search"] is False
-    assert set(plugin.context.deactivated_tools) == expected_tools
-    assert len(plugin.context.deactivated_tools) == len(expected_tools)
-
-
-def test_apply_startup_websearch_default_enables_tools_when_configured(monkeypatch):
-    module = _import_plugin_main(monkeypatch)
-    plugin = object.__new__(module.WebSearcherPro)
-    plugin.context = DummyContext()
-    plugin.plugin_config = types.SimpleNamespace(default_web_search_enabled=True)
-    calls = []
-
-    def fake_set_websearch_status(status: bool):
-        calls.append(status)
-
-    monkeypatch.setattr(plugin, "_set_websearch_status", fake_set_websearch_status, raising=False)
-
-    plugin._apply_startup_websearch_default()
-
-    assert calls == [True]
-
-
-def test_apply_startup_websearch_default_keeps_existing_status(monkeypatch):
-    module = _import_plugin_main(monkeypatch)
-    plugin = object.__new__(module.WebSearcherPro)
-    plugin.context = DummyContext()
-    plugin.context.config["provider_settings"]["web_search"] = True
-    plugin.plugin_config = types.SimpleNamespace(default_web_search_enabled=True)
-    calls = []
-
-    def fake_set_websearch_status(status: bool):
-        calls.append(status)
-
-    monkeypatch.setattr(plugin, "_set_websearch_status", fake_set_websearch_status, raising=False)
-
-    plugin._apply_startup_websearch_default()
-
-    assert calls == []
+    assert not plugin.context.config.saved
+    assert not plugin.context.activated_tools and not plugin.context.deactivated_tools
+    assert not hasattr(plugin, "_set_websearch_status")
 
 
 def test_new_text_search_tools_forward_category_and_empty_message(monkeypatch):
@@ -303,7 +257,9 @@ def test_new_text_search_tools_forward_category_and_empty_message(monkeypatch):
         plugin = object.__new__(module.WebSearcherPro)
         calls = []
 
-        async def fake_search_text_category(query: str, *, category: str, empty_message: str, limit: int = 5) -> str:
+        async def fake_search_text_category(
+            query: str, *, category: str, empty_message: str, limit: int = 5
+        ) -> str:
             calls.append((query, category, empty_message, limit))
             return f"forwarded:{category}"
 
@@ -324,6 +280,10 @@ def test_search_images_returns_model_text_without_yielding(monkeypatch):
         enable_random_image=False,
         enable_image_title=True,
     )
+    from astrbot_plugin_web_searcher_pro.search_models import SearchResult
+    from astrbot_plugin_web_searcher_pro.services.prompt_guard import PromptGuard
+
+    plugin.guard = PromptGuard()
     plugin.searxng_service = types.SimpleNamespace()
     plugin.image_service = types.SimpleNamespace()
     sent_messages = []
@@ -333,7 +293,7 @@ def test_search_images_returns_model_text_without_yielding(monkeypatch):
             sent_messages.append(message)
 
     async def fake_search(*args, **kwargs):
-        return module.SearchResult.from_iterable(
+        return SearchResult.from_iterable(
             [
                 {
                     "title": "Apple image",
@@ -354,3 +314,72 @@ def test_search_images_returns_model_text_without_yielding(monkeypatch):
     assert "Apple image" in result
     assert "Image: https://example.com/apple.jpg" in result
     assert sent_messages == []
+
+
+def test_every_external_text_entrypoint_is_guarded(monkeypatch):
+    from astrbot_plugin_web_searcher_pro.search_models import SearchResult
+    from astrbot_plugin_web_searcher_pro.services.prompt_guard import PromptGuard
+
+    module = _import_plugin_main(monkeypatch)
+    plugin = object.__new__(module.WebSearcherPro)
+    plugin.plugin_config = types.SimpleNamespace(image_result_limit=5)
+    plugin.guard = PromptGuard(enabled=True, base_url="http://guard.example")
+    scanned = []
+
+    async def scan(text):
+        scanned.append(text)
+        return True
+
+    plugin.guard.scan = scan
+
+    async def search(*args, **kwargs):
+        return SearchResult.from_iterable(
+            [
+                {
+                    "title": "UNTRUSTED_MARKER",
+                    "url": "https://example.org",
+                    "img_src": "https://example.org/a.png",
+                    "content": "external",
+                }
+            ]
+        )
+
+    async def external(*args, **kwargs):
+        return "UNTRUSTED_MARKER external content"
+
+    plugin.searxng_service = types.SimpleNamespace(search=search)
+    plugin.web_fetch_service = types.SimpleNamespace(fetch=external)
+    plugin.github_service = types.SimpleNamespace(search=external)
+    plugin.aur_service = types.SimpleNamespace(search=external)
+    event = types.SimpleNamespace(plain_result=lambda text: text)
+
+    async def invoke():
+        tools = [
+            "search_general",
+            "search_images",
+            "search_videos",
+            "search_news",
+            "search_science",
+            "search_music",
+            "search_technical",
+            "search_academic",
+            "search_map",
+            "search_files",
+            "search_social",
+            "search_books",
+            "fetch_website_content",
+            "search_github_repo",
+        ]
+        for name in tools:
+            result = await getattr(plugin, name)(event, "query")
+            assert '"screening": "blocked"' in result
+            assert "UNTRUSTED_MARKER" not in result
+        for name in ("search_aur", "github_search"):
+            outputs = [text async for text in getattr(plugin, name)(event, "query")]
+            assert len(outputs) == 1
+            assert '"screening": "blocked"' in outputs[0]
+            assert "UNTRUSTED_MARKER" not in outputs[0]
+
+    asyncio.run(invoke())
+    assert len(scanned) == 16
+    assert all("UNTRUSTED_MARKER" in text for text in scanned)

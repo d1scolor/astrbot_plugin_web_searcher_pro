@@ -1,1 +1,10 @@
 __pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+config.local.*
+*.key
+*.pem
+SECURITY_REVIEW.md

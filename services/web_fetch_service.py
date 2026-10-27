@@ -4,9 +4,10 @@ from bs4 import BeautifulSoup
 from readability import Document
 
 from ..errors import ExternalServiceError
+from ..utils.url_helpers import extract_github_repo, is_http_url
 from .github_service import GitHubService
 from .http_client import HttpClient
-from ..utils.url_helpers import extract_github_repo, is_http_url
+from .network_policy import validate_public_url
 
 
 class WebFetchService:
@@ -17,6 +18,11 @@ class WebFetchService:
     async def fetch(self, url: str) -> str:
         if not is_http_url(url):
             return "The provided URL is invalid."
+
+        try:
+            validate_public_url(url)
+        except ExternalServiceError:
+            return "Fetch blocked: only public Internet URLs on ports 80/443 are allowed."
 
         repo = extract_github_repo(url)
         if repo:
@@ -99,4 +105,8 @@ class WebFetchService:
         root_container = soup.find(
             attrs={"id": lambda value: isinstance(value, str) and value.strip().lower() in placeholder_ids}
         )
-        return bool(root_container or soup.find(attrs={"data-reactroot": True}) or soup.find("script", attrs={"type": "module"}))
+        return bool(
+            root_container
+            or soup.find(attrs={"data-reactroot": True})
+            or soup.find("script", attrs={"type": "module"})
+        )

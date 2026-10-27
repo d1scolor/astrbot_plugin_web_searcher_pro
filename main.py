@@ -1,22 +1,16 @@
-import asyncio
-import random
-
 from astrbot.api import *
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event.filter import *
 from astrbot.api.star import Context, Star, register
-from astrbot.core.message.components import Image, Node, Nodes, Plain
-from astrbot.core.message.message_event_result import MessageChain
 
 from .config import PluginConfig
 from .formatters.search_formatter import format_image_results, format_search_result
 from .services.aur_service import AurService
 from .services.github_service import GitHubService
 from .services.http_client import HttpClient
-from .services.image_service import ImageService
+from .services.prompt_guard import PromptGuard
 from .services.searxng_service import SearxngService
 from .services.web_fetch_service import WebFetchService
-
 
 GENERAL_EMPTY_MESSAGE = "No information found for your query."
 GENERAL_TOOL_NAME = "searxng_web_search_general"
@@ -62,125 +56,71 @@ WEBSEARCH_TOOL_NAMES = (
 )
 
 
-@register("web_searcher_pro", "buding", "更高性能的Web检索插件", "1.1.5",
-          "https://github.com/zouyonghe/astrbot_plugin_web_searcher_pro")
+@register(
+    "web_searcher_pro",
+    "buding",
+    "更高性能的Web检索插件",
+    "1.2.0",
+    "https://github.com/d1scolor/astrbot_plugin_web_searcher_pro",
+)
 class WebSearcherPro(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self.plugin_config = PluginConfig.from_astrbot(config)
         self.http_client = HttpClient(
-            proxy=self.plugin_config.proxy,
             timeout=self.plugin_config.request_timeout,
         )
-        self.image_service = ImageService(self.http_client)
-        self.github_service = GitHubService(self.http_client, token=self.plugin_config.github_token)
+        self.search_http_client = HttpClient(
+            timeout=self.plugin_config.request_timeout, trusted_base=self.plugin_config.searxng_api_url
+        )
+        self.guard = PromptGuard(
+            enabled=self.plugin_config.guard_enabled,
+            base_url=self.plugin_config.guard_api_url,
+            token=self.plugin_config.guard_auth_token,
+            timeout=self.plugin_config.guard_timeout,
+        )
+        # Public repository lookups do not borrow an administrator's private access.
+        self.github_service = GitHubService(self.http_client)
         self.searxng_service = SearxngService(
-            self.http_client,
+            self.search_http_client,
             self.plugin_config.searxng_api_url,
             image_candidate_limit=self.plugin_config.image_candidate_limit,
             image_result_limit=self.plugin_config.image_result_limit,
         )
         self.web_fetch_service = WebFetchService(self.http_client, self.github_service)
         self.aur_service = AurService(self.http_client)
-        self._apply_startup_websearch_default()
 
-    def _get_provider_settings(self) -> dict:
-        config = self.context.get_config()
-        provider_settings = config.get("provider_settings")
-        if not isinstance(provider_settings, dict):
-            provider_settings = {}
-            config["provider_settings"] = provider_settings
-        return provider_settings
+    def guard_unavailable(self):
+        return self.guard.enabled and not self.guard.configured()
 
-    def _apply_startup_websearch_default(self) -> None:
-        if not self.plugin_config.default_web_search_enabled:
-            return
-        provider_settings = self._get_provider_settings()
-        if provider_settings.get("web_search"):
-            return
-        self._set_websearch_status(True)
+    async def finish(self, text):
+        return await self.guard.review(text)
 
-    def _set_websearch_status(self, status: bool) -> None:
-        provider_settings = self._get_provider_settings()
-        provider_settings["web_search"] = status
-        self.context.get_config().save_config()
-        for tool_name in WEBSEARCH_TOOL_NAMES:
-            if status:
-                self.context.activate_llm_tool(tool_name)
-            else:
-                self.context.deactivate_llm_tool(tool_name)
-
-    async def _search_text_category(self, query: str, *, category: str, empty_message: str, limit: int = 5) -> str:
+    async def _search_text_category(
+        self, query: str, *, category: str, empty_message: str, limit: int = 5
+    ) -> str:
         logger.info(f"Starting {category} search for: {query}")
-        result = await self.searxng_service.search(query, category=category, limit=limit)
-        return format_search_result(result, empty_message=empty_message)
-
-    async def _build_image_node(self, event: AstrMessageEvent, item) -> Node | None:
-        base64_image = await self.image_service.download_base64(item.img_src)
-        if not base64_image:
-            return None
-        content = [Image.fromBase64(base64_image)]
-        if self.plugin_config.enable_image_title:
-            content.append(Plain(f"{item.title}\n"))
-        return Node(
-            uin=event.get_self_id(),
-            name="IMAGE",
-            content=content,
-        )
-
-    async def _send_image_results_to_user(self, event: AstrMessageEvent, results) -> None:
-        if self.plugin_config.enable_random_image:
-            selected = random.choice(results)
-            if not self.plugin_config.enable_image_title:
-                await event.send(MessageChain([Image.fromURL(selected.img_src)]))
-                return
-            base64_image = await self.image_service.download_base64(selected.img_src)
-            if not base64_image:
-                await event.send(MessageChain([Plain(IMAGE_DOWNLOAD_FAILED)]))
-                return
-            await event.send(MessageChain([Image.fromBase64(base64_image), Plain(selected.title)]))
-            return
-
-        nodes = await asyncio.gather(*(self._build_image_node(event, item) for item in results))
-        valid_nodes = [node for node in nodes if node]
-        if not valid_nodes:
-            await event.send(MessageChain([Plain(IMAGE_DOWNLOAD_FAILED)]))
-            return
-        await event.send(MessageChain([Nodes(valid_nodes)]))
+        if self.guard_unavailable():
+            return self.guard.result("unavailable")
+        try:
+            result = await self.searxng_service.search(query, category=category, limit=limit)
+            return await self.finish(format_search_result(result, empty_message=empty_message))
+        except Exception:
+            return self.guard.result("unavailable")
 
     @command("websearch")
     async def websearch(self, event: AstrMessageEvent, operation: str = None):
-        """Only use this command when the user explicitly wants to enable or disable web search.
-
-        This command is for toggling the plugin's web-search tools. Do not use it for ordinary search requests.
-        """
-        websearch = bool(self._get_provider_settings().get("web_search", False))
-        if operation is None:
-            status_now = "开启" if websearch else "关闭"
-            yield event.plain_result(
-                f"当前网页搜索功能状态：{status_now}。使用 /websearch on 或者 off 启用或者关闭。"
+        """Report search configuration. This command cannot change shared settings."""
+        yield event.plain_result(
+            "Search is configured in this plugin's WebUI settings. "
+            "Chat commands cannot change global settings or tool permissions. "
+            + (
+                "Prompt Guard is enabled."
+                if self.guard.enabled
+                else "Prompt Guard is disabled; results are unscanned."
             )
-            return
-
-        operation = operation.lower()
-        if operation == "on":
-            if websearch:
-                yield event.plain_result("网页搜索功能已经是开启状态")
-                return
-            self._set_websearch_status(True)
-            yield event.plain_result("已开启网页搜索功能")
-            return
-
-        if operation == "off":
-            if not websearch:
-                yield event.plain_result("网页搜索功能已经是关闭状态")
-                return
-            self._set_websearch_status(False)
-            yield event.plain_result("已关闭网页搜索功能")
-            return
-
-        yield event.plain_result("操作参数错误，应为 on 或 off")
+        )
 
     @llm_tool(GENERAL_TOOL_NAME)
     async def search_general(self, event: AstrMessageEvent, query: str) -> str:
@@ -189,7 +129,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query used to fetch general web-based information.
         """
-        return await self._search_text_category(query, category="general", empty_message=GENERAL_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, category="general", empty_message=GENERAL_EMPTY_MESSAGE
+        )
 
     @llm_tool(IMAGES_TOOL_NAME)
     async def search_images(self, event: AstrMessageEvent, query: str) -> str:
@@ -201,20 +143,18 @@ class WebSearcherPro(Star):
             query (string): A search query focused on the subject of the images, such as landmarks, products, people, or scenes. Do not add generic words like "images" because this tool already searches image results.
         """
         logger.info(f"Starting image search for: {query}")
-        result = await self.searxng_service.search(
-            query,
-            category="images",
-            limit=self.plugin_config.image_result_limit,
-            engines=["google images", "bing images"],
-        )
-        if result.error_message:
-            return result.error_message
-        if result.is_empty:
-            return IMAGE_EMPTY_MESSAGE
-
-        if self.plugin_config.image_delivery_mode in {"user", "both"}:
-            await self._send_image_results_to_user(event, result.results)
-        return format_image_results(result.results)
+        if self.guard_unavailable():
+            return self.guard.result("unavailable")
+        try:
+            result = await self.searxng_service.search(
+                query, category="images", limit=self.plugin_config.image_result_limit
+            )
+            text = result.error_message or (
+                format_image_results(result.results) if not result.is_empty else IMAGE_EMPTY_MESSAGE
+            )
+            return await self.finish(text)
+        except Exception:
+            return self.guard.result("unavailable")
 
     @llm_tool(VIDEOS_TOOL_NAME)
     async def search_videos(self, event: AstrMessageEvent, query: str):
@@ -241,7 +181,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query about scientific topics, research areas, discoveries, or concepts, such as "quantum mechanics" or "CRISPR gene editing".
         """
-        return await self._search_text_category(query, category="science", empty_message=SCIENCE_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, category="science", empty_message=SCIENCE_EMPTY_MESSAGE
+        )
 
     @llm_tool(MUSIC_TOOL_NAME)
     async def search_music(self, event: AstrMessageEvent, query: str) -> str:
@@ -259,7 +201,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query about specific technical topics, engineering concepts, APIs, programming languages, frameworks, or troubleshooting details.
         """
-        return await self._search_text_category(query, category="technical", empty_message=TECHNICAL_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, category="technical", empty_message=TECHNICAL_EMPTY_MESSAGE
+        )
 
     @llm_tool(ACADEMIC_TOOL_NAME)
     async def search_academic(self, event: AstrMessageEvent, query: str) -> str:
@@ -268,7 +212,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query about academic topics, papers, authors, fields of study, or research keywords. Keep the query focused on the subject rather than generic academic wording.
         """
-        return await self._search_text_category(query, category="academic", empty_message=ACADEMIC_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, category="academic", empty_message=ACADEMIC_EMPTY_MESSAGE
+        )
 
     @llm_tool(MAP_TOOL_NAME)
     async def search_map(self, event: AstrMessageEvent, query: str) -> str:
@@ -316,7 +262,12 @@ class WebSearcherPro(Star):
             url (string): The full HTTP or HTTPS URL of the page to fetch.
         """
         logger.info(f"Fetching web content for: {url}")
-        return await self.web_fetch_service.fetch(url)
+        if self.guard_unavailable():
+            return self.guard.result("unavailable")
+        try:
+            return await self.finish(await self.web_fetch_service.fetch(url))
+        except Exception:
+            return self.guard.result("unavailable")
 
     @command("aur")
     async def search_aur(self, event: AstrMessageEvent, query: str):
@@ -325,7 +276,13 @@ class WebSearcherPro(Star):
         This command is only for package lookup in the Arch User Repository. Do not use it for general web search, people, news, or ordinary background research.
         """
         logger.info(f"Searching AUR packages for: {query}")
-        result = await self.aur_service.search(query)
+        if self.guard_unavailable():
+            yield event.plain_result(self.guard.result("unavailable"))
+            return
+        try:
+            result = await self.finish(await self.aur_service.search(query))
+        except Exception:
+            result = self.guard.result("unavailable")
         yield event.plain_result(result)
 
     @llm_tool("searxng_github_search")
@@ -338,7 +295,12 @@ class WebSearcherPro(Star):
             query (string): Repository keywords, an `owner/repo` identifier, a GitHub repository URL, or a clone URL.
         """
         logger.info(f"Searching GitHub repositories for: {query}")
-        return await self.github_service.search(query)
+        if self.guard_unavailable():
+            return self.guard.result("unavailable")
+        try:
+            return await self.finish(await self.github_service.search(query))
+        except Exception:
+            return self.guard.result("unavailable")
 
     @command("github")
     async def github_search(self, event: AstrMessageEvent, query: str = None):
