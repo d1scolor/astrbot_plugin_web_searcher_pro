@@ -58,7 +58,13 @@ connectivity and content-size limits: those can also cause the content to be wit
 The existing `searxng_*` search categories, page-fetch and public GitHub lookup tools
 are retained. Search queries are limited to 2000 characters. Image search returns URLs,
 titles and descriptions to the model; it never downloads, HEAD-probes or sends candidate
-images to users. Another tool can select/import a few candidates as needed. Image engines
+images to users. For user requests to find/show pictures, its tool schema and successful
+results direct the agent to select up to three direct image URLs and call
+`comfy_send_images` from ComfyUI Direct **v0.4.0+** for actual attachments. Enable that
+tool alongside image search. Links are appropriate when explicitly requested; generation
+research candidates stay unsent. Selection and tool routing still depend on the model;
+this plugin does not automatically download/post every candidate. Blocked or unavailable
+screening responses receive no delivery guidance. Image engines
 follow the instance's configured category rather than a hardcoded Google/Bing allowlist.
 
 All external text returned by the plugin's LLM tools and external-content commands

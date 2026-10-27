@@ -314,6 +314,11 @@ def test_search_images_returns_model_text_without_yielding(monkeypatch):
     assert "Apple image" in result
     assert "Image: https://example.com/apple.jpg" in result
     assert sent_messages == []
+    import json
+
+    payload = json.loads(result)
+    assert "comfy_send_images" in payload["delivery_guidance"]
+    assert payload["trusted"] is False
 
 
 def test_every_external_text_entrypoint_is_guarded(monkeypatch):

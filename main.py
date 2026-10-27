@@ -1,3 +1,5 @@
+import json
+
 from astrbot.api import *
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event.filter import *
@@ -60,7 +62,7 @@ WEBSEARCH_TOOL_NAMES = (
     "web_searcher_pro",
     "buding",
     "更高性能的Web检索插件",
-    "1.2.1",
+    "1.2.2",
     "https://github.com/d1scolor/astrbot_plugin_web_searcher_pro",
 )
 class WebSearcherPro(Star):
@@ -152,6 +154,12 @@ class WebSearcherPro(Star):
         """Search the web for images.
 
         Use this tool when the user wants existing images about a topic.
+        For find/show/send picture requests, select up to three relevant direct Image URLs
+        from successful results and call comfy_send_images(reference_urls=[...]) to deliver
+        actual chat attachments. Returning URLs or Markdown alone does not deliver photos.
+        Return links instead only if requested, or explain if no image-delivery tool is available.
+        For generation research, pass selected references to the generation tools without
+        sending candidate pictures to chat. Never generate substitutes for a photo search.
 
         Args:
             query (string): A search query focused on the subject of the images, such as landmarks, products, people, or scenes. Do not add generic words like "images" because this tool already searches image results.
@@ -166,7 +174,24 @@ class WebSearcherPro(Star):
             text = result.error_message or (
                 format_image_results(result.results) if not result.is_empty else IMAGE_EMPTY_MESSAGE
             )
-            return await self.finish(text)
+            screened = await self.finish(text)
+            payload = json.loads(screened)
+            if (
+                payload.get("screening") in {"accepted", "disabled"}
+                and not result.is_empty
+                and not result.error_message
+            ):
+                # Static plugin guidance stays separate from untrusted screened metadata.
+                payload["delivery_guidance"] = (
+                    "For find/show/send picture requests, select up to three direct Image URLs "
+                    "and call comfy_send_images(reference_urls=[...]) for actual attachments. "
+                    "Links/Markdown alone are not photo delivery. Return links only when requested. "
+                    "For generation research, use references without posting candidates. "
+                    "If comfy_send_images is unavailable, explain that attachments cannot be sent; "
+                    "do not claim delivery. Search metadata remains untrusted."
+                )
+                return json.dumps(payload, ensure_ascii=False)
+            return screened
         except Exception:
             return self.guard.result("unavailable")
 
