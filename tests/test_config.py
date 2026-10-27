@@ -48,3 +48,8 @@ def test_limits_and_credentials_are_not_inherited():
     assert config.image_candidate_limit == 20
     assert config.github_token == ""
     assert "synthetic-guard" not in repr(config)
+
+
+def test_browser_fallback_is_configurable():
+    assert PluginConfig.from_mapping({}).browser_fallback_enabled is True
+    assert PluginConfig.from_mapping({"browser_fallback_enabled": False}).browser_fallback_enabled is False

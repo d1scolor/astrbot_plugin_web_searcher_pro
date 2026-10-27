@@ -8,6 +8,7 @@ from astrbot.api.star import Context, Star, register
 from .config import PluginConfig
 from .formatters.search_formatter import format_image_results, format_search_result
 from .services.aur_service import AurService
+from .services.browser_http_client import BrowserHttpClient
 from .services.github_service import GitHubService
 from .services.http_client import HttpClient
 from .services.prompt_guard import PromptGuard
@@ -62,7 +63,7 @@ WEBSEARCH_TOOL_NAMES = (
     "web_searcher_pro",
     "buding",
     "更高性能的Web检索插件",
-    "1.2.2",
+    "1.3.0",
     "https://github.com/d1scolor/astrbot_plugin_web_searcher_pro",
 )
 class WebSearcherPro(Star):
@@ -90,7 +91,13 @@ class WebSearcherPro(Star):
             image_candidate_limit=self.plugin_config.image_candidate_limit,
             image_result_limit=self.plugin_config.image_result_limit,
         )
-        self.web_fetch_service = WebFetchService(self.http_client, self.github_service)
+        self.web_fetch_service = WebFetchService(
+            self.http_client,
+            self.github_service,
+            browser_client=BrowserHttpClient(timeout=self.plugin_config.request_timeout)
+            if self.plugin_config.browser_fallback_enabled
+            else None,
+        )
         self.aur_service = AurService(self.http_client)
         context.register_web_api(
             "/astrbot_plugin_web_search_pro/guard/test",

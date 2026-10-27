@@ -53,6 +53,40 @@ accepts no endpoint/token/text overrides, and cannot be used by a chat member as
 If search still returns `unavailable` after a successful connection test, check search
 connectivity and content-size limits: those can also cause the content to be withheld.
 
+## Browser-compatible webpage fallback
+
+`browser_fallback_enabled` defaults to true. The existing `searxng_web_fetch_url`
+tool first uses the normal public HTTP client. Network failures, HTTP 403/406/418/503,
+or recognised HTTP-200 anti-bot challenge pages trigger one browser-compatible
+fetch chain through `curl_cffi` with a Chrome fingerprint. HTTP 429 is not retried
+by this fallback. Normal successful pages and GitHub repository lookups keep the
+existing path. Final non-200 responses report their HTTP status.
+
+No extra container, browser installation or member computer-use permission is
+required. The dependency uses native wheels; unsupported host architectures may
+need additional packaging work. It does not execute JavaScript, solve CAPTCHAs or
+use login cookies. Access to every site is not guaranteed. Set the option false to
+return to ordinary fetching.
+
+Each hop resolves all DNS answers through the existing public-only policy and pins
+a validated address into libcurl. Automatic redirects, environment proxies and
+cross-hop cookies/credentials are disabled. Redirect destinations are independently
+validated; the connected peer must match the pinned public address. HTTP(S) ports
+80/443 only, up to four hops, two concurrent fallback chains, 2 MiB decoded body
+limit and one configured timeout for the entire fallback chain. The normal fetch
+and fallback each have a timeout, so total tool latency can be roughly twice the
+request timeout. DNS, TLS and browser-fingerprint compatibility can still fail.
+
+Returned text follows the same extraction and optional Prompt Guard path as normal
+fetches. The fallback does not bypass screening or enable private-network access.
+A recognised challenge page is reported as such, rather than represented as article
+content. Unrecognised challenge pages remain possible.
+
+Validation: mock tests cover DNS pinning, private/mixed DNS, private/public redirects,
+proxy suppression, connected-peer checks, body limits and fallback routing. A live
+curl transport smoke test retrieved a public example page and a public Fandom article
+with HTTP 200. This is not a cross-site success guarantee or a live AstrBot/guard test.
+
 ## Behavior
 
 The existing `searxng_*` search categories, page-fetch and public GitHub lookup tools

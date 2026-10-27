@@ -11,9 +11,10 @@ from .network_policy import validate_public_url
 
 
 class WebFetchService:
-    def __init__(self, http_client: HttpClient, github_service: GitHubService):
+    def __init__(self, http_client: HttpClient, github_service: GitHubService, browser_client=None):
         self.http_client = http_client
         self.github_service = github_service
+        self.browser_client = browser_client
 
     async def fetch(self, url: str) -> str:
         if not is_http_url(url):
@@ -28,12 +29,25 @@ class WebFetchService:
         if repo:
             return await self.github_service.search(repo)
 
+        status, html = None, ""
         try:
             status, html, _ = await self.http_client.get_text(url)
         except ExternalServiceError:
+            pass
+        challenge = self._is_challenge(html)
+        if self.browser_client and (
+            status is None or status in {403, 406, 418, 503} or (status == 200 and challenge)
+        ):
+            try:
+                status, html, _ = await self.browser_client.get_text(url)
+            except ExternalServiceError:
+                return "Webpage fetch failed: browser-compatible fallback could not retrieve the page."
+        if status is None:
             return "Fetch URL failed, please try again later."
         if status != 200:
-            return "Unable to fetch website content. Please check the URL."
+            return f"Unable to fetch website content (HTTP {status})."
+        if self._is_challenge(html):
+            return "Website returned an anti-bot challenge, not article content. JavaScript/CAPTCHA handling is unavailable."
         summary = Document(html).summary()
         readable_text = self._extract_plain_text(summary)
         if len(readable_text) >= 80:
@@ -44,6 +58,19 @@ class WebFetchService:
             return fallback
 
         return readable_text or "No readable content found on the page."
+
+    @staticmethod
+    def _is_challenge(html):
+        sample = html[:100000].lower()
+        return any(
+            marker in sample
+            for marker in (
+                "<title>just a moment",
+                "<title>attention required! | cloudflare",
+                'id="challenge-form"',
+                "cf-chl-platform",
+            )
+        )
 
     def _extract_plain_text(self, html: str) -> str:
         if not html:

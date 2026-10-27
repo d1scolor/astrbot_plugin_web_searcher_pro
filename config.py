@@ -13,6 +13,7 @@ class PluginConfig:
     request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     image_result_limit: int = DEFAULT_IMAGE_RESULT_LIMIT
     image_candidate_limit: int = DEFAULT_IMAGE_CANDIDATE_LIMIT
+    browser_fallback_enabled: bool = True
     guard_enabled: bool = False
     guard_api_url: str = ""
     guard_auth_token: str = field(default="", repr=False)
@@ -32,6 +33,7 @@ class PluginConfig:
             request_timeout=max(3, min(int(mapping.get("request_timeout", 15)), 30)),
             image_result_limit=max(1, min(int(mapping.get("image_result_limit", 5)), 10)),
             image_candidate_limit=max(1, min(int(mapping.get("image_candidate_limit", 10)), 20)),
+            browser_fallback_enabled=mapping.get("browser_fallback_enabled", True) is True,
             guard_enabled=mapping.get("guard_enabled", False) is True,
             guard_api_url=str(mapping.get("guard_api_url", "")).strip().rstrip("/"),
             guard_auth_token=str(mapping.get("guard_auth_token", "")).strip(),

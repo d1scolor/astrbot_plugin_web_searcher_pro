@@ -59,3 +59,47 @@ async def test_fetch_falls_back_to_metadata_for_client_rendered_pages():
 
     assert "AstrBot - Agentic AI 助手" in result
     assert "client-rendered" in result
+
+
+@pytest.mark.asyncio
+async def test_blocked_page_uses_browser_fallback():
+    from unittest.mock import AsyncMock
+
+    browser = AsyncMock()
+    browser.get_text.return_value = (
+        200,
+        "<article><p>" + "Readable article content. " * 12 + "</p></article>",
+        {},
+    )
+    service = WebFetchService(DummyHttpClient("blocked", 403), DummyGitHubService(), browser)
+    result = await service.fetch("https://example.com/page")
+    assert "Readable article content" in result
+    browser.get_text.assert_awaited_once_with("https://example.com/page")
+
+
+@pytest.mark.asyncio
+async def test_success_and_rate_limit_do_not_retry_browser():
+    from unittest.mock import AsyncMock
+
+    browser = AsyncMock()
+    for status in (200, 429):
+        service = WebFetchService(
+            DummyHttpClient("<p>" + "Article text. " * 20 + "</p>", status), DummyGitHubService(), browser
+        )
+        result = await service.fetch("https://example.com/page")
+        if status == 429:
+            assert "429" in result
+    browser.get_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_challenge_is_not_presented_as_article():
+    from unittest.mock import AsyncMock
+
+    browser = AsyncMock()
+    challenge = "<title>Just a moment...</title><div>Verify you are human</div>"
+    browser.get_text.return_value = (200, challenge, {})
+    service = WebFetchService(DummyHttpClient(challenge), DummyGitHubService(), browser)
+    result = await service.fetch("https://example.com/page")
+    assert "anti-bot challenge" in result
+    browser.get_text.assert_awaited_once()

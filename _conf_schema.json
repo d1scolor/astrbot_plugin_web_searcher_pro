@@ -46,5 +46,11 @@
     "description": "Prompt Guard timeout in seconds",
     "default": 20,
     "hint": "1–60. Failures withhold external content when screening is enabled."
+  },
+  "browser_fallback_enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "Browser-compatible webpage fallback (curl_cffi)",
+    "hint": "Retry blocked/challenged public webpages with a Chrome-compatible HTTP fingerprint. No JavaScript or CAPTCHA solving. All results still pass through optional Prompt Guard."
   }
 }
