@@ -12,6 +12,7 @@ from .services.browser_http_client import BrowserHttpClient
 from .services.github_service import GitHubService
 from .services.http_client import HttpClient
 from .services.prompt_guard import PromptGuard
+from .services.search_budget import SearchBudget
 from .services.searxng_service import SearxngService
 from .services.web_fetch_service import WebFetchService
 
@@ -63,7 +64,7 @@ WEBSEARCH_TOOL_NAMES = (
     "web_searcher_pro",
     "buding",
     "更高性能的Web检索插件",
-    "1.3.0",
+    "1.3.1",
     "https://github.com/d1scolor/astrbot_plugin_web_searcher_pro",
 )
 class WebSearcherPro(Star):
@@ -120,17 +121,73 @@ class WebSearcherPro(Star):
     async def finish(self, text):
         return await self.guard.review(text)
 
+    def search_internal_error(self, error):
+        logger.warning("Search plugin internal failure: exception_type=%s", type(error).__name__)
+        payload = json.loads(self.guard.result("unavailable"))
+        payload["search_status"] = "plugin_error"
+        payload["message"] = (
+            "Search plugin failed internally; no external content is returned. Check plugin diagnostics rather than repeating the query."
+        )
+        return json.dumps(payload)
+
+    async def run_search(self, event, query, *, category, limit):
+        budget = SearchBudget.for_event(event)
+        config = self.plugin_config
+        blocked = budget.claim(
+            category,
+            query,
+            max_calls=getattr(config, "search_call_limit", 6),
+            max_empty=getattr(config, "search_empty_limit", 3),
+            max_failures=getattr(config, "search_failure_limit", 2),
+        )
+        if blocked:
+            from .search_models import SearchResult
+
+            return SearchResult(
+                error_code=blocked,
+                error_message="Further search is blocked for this request. Stop searching; summarize available evidence and explain the limitation without guessing.",
+            )
+        result = await self.searxng_service.search(query, category=category, limit=limit)
+        budget.record(result)
+        logger.info(
+            "Search outcome: category=%s code=%s returned=%d http=%s engine_failures=%s raw=%s",
+            category,
+            result.error_code or ("empty" if result.is_empty else "ok"),
+            len(result.results),
+            result.diagnostics.get("http_status"),
+            result.diagnostics.get("engine_failure_count"),
+            result.diagnostics.get("raw_result_count"),
+        )
+        return result
+
+    async def search_reply(self, text, result):
+        payload = json.loads(await self.finish(text))
+        if payload.get("screening") in {"accepted", "disabled"}:
+            payload["search_status"] = result.error_code or ("empty" if result.is_empty else "ok")
+            payload["diagnostics"] = result.diagnostics
+            payload["stop_searching"] = result.error_code in {
+                "search_budget_exhausted",
+                "repeated_empty_results",
+                "repeated_backend_failure",
+                "duplicate_search",
+            }
+            if result.error_code or result.is_empty:
+                payload["guidance"] = (
+                    "Do not equate a backend failure with no matching pages. Avoid repeated retries; use a different source or state the uncertainty."
+                )
+        return json.dumps(payload, ensure_ascii=False)
+
     async def _search_text_category(
-        self, query: str, *, category: str, empty_message: str, limit: int = 5
+        self, query: str, *, category: str, empty_message: str, limit: int = 5, event=None
     ) -> str:
         logger.info(f"Starting {category} search for: {query}")
         if self.guard_unavailable():
             return self.guard.result("unavailable")
         try:
-            result = await self.searxng_service.search(query, category=category, limit=limit)
-            return await self.finish(format_search_result(result, empty_message=empty_message))
-        except Exception:
-            return self.guard.result("unavailable")
+            result = await self.run_search(event, query, category=category, limit=limit)
+            return await self.search_reply(format_search_result(result, empty_message=empty_message), result)
+        except Exception as error:
+            return self.search_internal_error(error)
 
     @command("websearch")
     async def websearch(self, event: AstrMessageEvent, operation: str = None):
@@ -153,7 +210,7 @@ class WebSearcherPro(Star):
             query (string): A search query used to fetch general web-based information.
         """
         return await self._search_text_category(
-            query, category="general", empty_message=GENERAL_EMPTY_MESSAGE
+            query, event=event, category="general", empty_message=GENERAL_EMPTY_MESSAGE
         )
 
     @llm_tool(IMAGES_TOOL_NAME)
@@ -175,13 +232,13 @@ class WebSearcherPro(Star):
         if self.guard_unavailable():
             return self.guard.result("unavailable")
         try:
-            result = await self.searxng_service.search(
-                query, category="images", limit=self.plugin_config.image_result_limit
+            result = await self.run_search(
+                event, query, category="images", limit=self.plugin_config.image_result_limit
             )
             text = result.error_message or (
                 format_image_results(result.results) if not result.is_empty else IMAGE_EMPTY_MESSAGE
             )
-            screened = await self.finish(text)
+            screened = await self.search_reply(text, result)
             payload = json.loads(screened)
             if (
                 payload.get("screening") in {"accepted", "disabled"}
@@ -199,8 +256,8 @@ class WebSearcherPro(Star):
                 )
                 return json.dumps(payload, ensure_ascii=False)
             return screened
-        except Exception:
-            return self.guard.result("unavailable")
+        except Exception as error:
+            return self.search_internal_error(error)
 
     @llm_tool(VIDEOS_TOOL_NAME)
     async def search_videos(self, event: AstrMessageEvent, query: str):
@@ -209,7 +266,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query focused on the topic or keywords of the videos. Avoid adding broad helper words like "videos" because the search is already scoped to video results.
         """
-        return await self._search_text_category(query, category="videos", empty_message=VIDEOS_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="videos", empty_message=VIDEOS_EMPTY_MESSAGE
+        )
 
     @llm_tool(NEWS_TOOL_NAME)
     async def search_news(self, event: AstrMessageEvent, query: str) -> str:
@@ -218,7 +277,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query focused on the topic, event, company, or person in the news. Avoid adding the word "news" unless it is part of the actual subject.
         """
-        return await self._search_text_category(query, category="news", empty_message=NEWS_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="news", empty_message=NEWS_EMPTY_MESSAGE
+        )
 
     @llm_tool(SCIENCE_TOOL_NAME)
     async def search_science(self, event: AstrMessageEvent, query: str) -> str:
@@ -228,7 +289,7 @@ class WebSearcherPro(Star):
             query (string): A search query about scientific topics, research areas, discoveries, or concepts, such as "quantum mechanics" or "CRISPR gene editing".
         """
         return await self._search_text_category(
-            query, category="science", empty_message=SCIENCE_EMPTY_MESSAGE
+            query, event=event, category="science", empty_message=SCIENCE_EMPTY_MESSAGE
         )
 
     @llm_tool(MUSIC_TOOL_NAME)
@@ -238,7 +299,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query about songs, albums, artists, genres, lyrics, performances, or music topics. Avoid redundant helper words when the subject is already clear.
         """
-        return await self._search_text_category(query, category="music", empty_message=MUSIC_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="music", empty_message=MUSIC_EMPTY_MESSAGE
+        )
 
     @llm_tool(TECHNICAL_TOOL_NAME)
     async def search_technical(self, event: AstrMessageEvent, query: str) -> str:
@@ -248,7 +311,7 @@ class WebSearcherPro(Star):
             query (string): A search query about specific technical topics, engineering concepts, APIs, programming languages, frameworks, or troubleshooting details.
         """
         return await self._search_text_category(
-            query, category="technical", empty_message=TECHNICAL_EMPTY_MESSAGE
+            query, event=event, category="technical", empty_message=TECHNICAL_EMPTY_MESSAGE
         )
 
     @llm_tool(ACADEMIC_TOOL_NAME)
@@ -259,7 +322,7 @@ class WebSearcherPro(Star):
             query (string): A search query about academic topics, papers, authors, fields of study, or research keywords. Keep the query focused on the subject rather than generic academic wording.
         """
         return await self._search_text_category(
-            query, category="academic", empty_message=ACADEMIC_EMPTY_MESSAGE
+            query, event=event, category="academic", empty_message=ACADEMIC_EMPTY_MESSAGE
         )
 
     @llm_tool(MAP_TOOL_NAME)
@@ -269,7 +332,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query focused on places, addresses, landmarks, routes, or geographic points of interest.
         """
-        return await self._search_text_category(query, category="map", empty_message=MAP_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="map", empty_message=MAP_EMPTY_MESSAGE
+        )
 
     @llm_tool(FILES_TOOL_NAME)
     async def search_files(self, event: AstrMessageEvent, query: str) -> str:
@@ -278,7 +343,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query focused on downloadable documents, datasets, manuals, PDFs, presentations, or other file-like resources.
         """
-        return await self._search_text_category(query, category="files", empty_message=FILES_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="files", empty_message=FILES_EMPTY_MESSAGE
+        )
 
     @llm_tool(SOCIAL_TOOL_NAME)
     async def search_social(self, event: AstrMessageEvent, query: str) -> str:
@@ -287,7 +354,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query about people, accounts, posts, communities, or discussions on social platforms.
         """
-        return await self._search_text_category(query, category="social", empty_message=SOCIAL_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="social", empty_message=SOCIAL_EMPTY_MESSAGE
+        )
 
     @llm_tool(BOOKS_TOOL_NAME)
     async def search_books(self, event: AstrMessageEvent, query: str) -> str:
@@ -296,7 +365,9 @@ class WebSearcherPro(Star):
         Args:
             query (string): A search query about book titles, authors, editions, ISBNs, subjects, or reading recommendations.
         """
-        return await self._search_text_category(query, category="books", empty_message=BOOKS_EMPTY_MESSAGE)
+        return await self._search_text_category(
+            query, event=event, category="books", empty_message=BOOKS_EMPTY_MESSAGE
+        )
 
     @llm_tool(FETCH_URL_TOOL_NAME)
     async def fetch_website_content(self, event: AstrMessageEvent, url: str):

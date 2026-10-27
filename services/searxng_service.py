@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Iterable
 
 from ..errors import ExternalServiceError
@@ -45,8 +46,8 @@ def filter_results(
     items = deduplicate_results(items)
     if category != "images":
         items = rank_text_results(items, profile=ranking_profile)
-        return SearchResult(results=items[:limit])
-    return SearchResult(results=items[:limit])
+        return replace(result, results=items[:limit])
+    return replace(result, results=items[:limit])
 
 
 class SearxngService:
@@ -65,14 +66,19 @@ class SearxngService:
 
     async def search(self, query: str, *, category="general", limit=5, engines=None):
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
-            return SearchResult(error_message="Search query must contain 1–2000 characters.")
+            return SearchResult(
+                error_message="Search query must contain 1–2000 characters.", error_code="invalid_query"
+            )
         try:
             async with asyncio.timeout(getattr(self.http_client, "timeout", 15)):
                 return await self._search(
                     query, category=category, limit=max(1, min(limit, 10)), engines=engines
                 )
         except TimeoutError:
-            return SearchResult(error_message="Search deadline exceeded.")
+            return SearchResult(
+                error_message="Search deadline exceeded; no conclusion about matching pages can be drawn.",
+                error_code="timeout",
+            )
 
     async def _search(
         self, query: str, *, category: str = "general", limit: int = 5, engines: list[str] | None = None
@@ -89,7 +95,7 @@ class SearxngService:
         if result.error_message:
             return result
         if result.is_empty:
-            return SearchResult()
+            return result
         return await self._filter_image_results(result, engines=engines, limit=limit)
 
     async def _request_search(self, query: str, *, category: str, limit: int, lang: str) -> SearchResult:
@@ -102,21 +108,76 @@ class SearxngService:
         }
         try:
             status, data = await self.http_client.get_json(f"{self.base_url}/search", params=params)
-        except (ExternalServiceError, TypeError, ValueError):
-            return SearchResult()
+        except ExternalServiceError:
+            return SearchResult(
+                error_message="Search backend request failed or was blocked. This is not an empty search result.",
+                error_code="backend_request_failed",
+            )
+        except (TypeError, ValueError):
+            return SearchResult(
+                error_message="Search backend returned invalid JSON. Check its JSON search interface.",
+                error_code="invalid_json",
+            )
+        diagnostics = {"http_status": status}
         if status == 403:
             return SearchResult(
-                error_message="SearXNG returned 403 Forbidden. Please check whether the /search JSON interface is enabled and reachable."
+                error_message="SearXNG returned 403 Forbidden. Please check whether the /search JSON interface is enabled and reachable.",
+                error_code="http_error",
+                diagnostics=diagnostics,
             )
-        if status != 200 or not isinstance(data, dict):
-            return SearchResult()
-        raw_results = data.get("results", [])
-        if not isinstance(raw_results, list) or not all(isinstance(item, Mapping) for item in raw_results):
-            return SearchResult()
-        try:
-            return SearchResult.from_iterable(raw_results)
-        except (TypeError, ValueError):
-            return SearchResult()
+        if status != 200:
+            return SearchResult(
+                error_message=f"Search backend returned HTTP {status}; this is not evidence that no pages match.",
+                error_code="http_error",
+                diagnostics=diagnostics,
+            )
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            return SearchResult(
+                error_message="Search backend response has no valid results list.",
+                error_code="invalid_response",
+                diagnostics=diagnostics,
+            )
+        raw_results = data["results"]
+        failures = data.get("unresponsive_engines", [])
+        diagnostics.update(
+            raw_result_count=len(raw_results),
+            engine_failure_count=len(failures) if isinstance(failures, list) else 0,
+            invalid_result_count=sum(not isinstance(item, Mapping) for item in raw_results),
+        )
+        reasons = {}
+        for item in failures if isinstance(failures, list) else []:
+            detail = str(item[1]).casefold() if isinstance(item, (list, tuple)) and len(item) > 1 else ""
+            reason = (
+                "captcha"
+                if "captcha" in detail
+                else "rate_limited"
+                if "429" in detail or "too many requests" in detail
+                else "timeout"
+                if "timeout" in detail or "timed out" in detail
+                else "other"
+            )
+            reasons[reason] = reasons.get(reason, 0) + 1
+        diagnostics["engine_failure_reasons"] = reasons
+        if not raw_results and diagnostics["engine_failure_count"]:
+            return SearchResult(
+                error_message=f"No results returned; {diagnostics['engine_failure_count']} search engines reported failures. Search outcome is inconclusive.",
+                error_code="engine_failures",
+                diagnostics=diagnostics,
+            )
+        if not raw_results and data.get("error"):
+            return SearchResult(
+                error_message="Search backend reported an error without results.",
+                error_code="backend_error",
+                diagnostics=diagnostics,
+            )
+        valid = [item for item in raw_results if isinstance(item, Mapping)]
+        if raw_results and not valid:
+            return SearchResult(
+                error_message="Search backend returned malformed result entries.",
+                error_code="invalid_results",
+                diagnostics=diagnostics,
+            )
+        return SearchResult(results=SearchResult.from_iterable(valid).results, diagnostics=diagnostics)
 
     async def _search_text(
         self, query: str, *, category: str, limit: int, engines: list[str] | None = None
@@ -132,6 +193,7 @@ class SearxngService:
             seen_categories.add(current_category)
             ordered_categories.append(current_category)
 
+        result = SearchResult()
         for current_category in ordered_categories:
             result = await self._request_search(
                 query,
@@ -151,7 +213,7 @@ class SearxngService:
             if filtered.results:
                 return filtered
 
-        return SearchResult()
+        return replace(result, results=[])
 
     async def _filter_image_results(
         self, result: SearchResult, engines: list[str] | None = None, limit: int | None = None
@@ -172,4 +234,4 @@ class SearxngService:
         # Metadata only: do not contact untrusted candidates to test availability.
         ranked = rank_image_results(valid_items)
         result_limit = self.image_result_limit if limit is None else min(limit, self.image_result_limit)
-        return SearchResult(results=ranked[:result_limit])
+        return replace(result, results=ranked[:result_limit])

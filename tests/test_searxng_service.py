@@ -325,7 +325,7 @@ async def test_search_returns_configuration_error_for_403_response():
 
 
 @pytest.mark.asyncio
-async def test_search_falls_back_when_result_item_has_invalid_score_value():
+async def test_search_keeps_results_when_score_is_invalid():
     client = DummyHttpClient(
         {
             "it": (
@@ -346,23 +346,26 @@ async def test_search_falls_back_when_result_item_has_invalid_score_value():
 
     result = await service.search("python asyncio", category="technical", limit=5)
 
-    assert [item.url for item in result.results] == ["https://docs.python.org/3/library/asyncio.html"]
-    assert [params["categories"] for _, params in client.calls] == ["it", "technical"]
+    assert [item.url for item in result.results] == ["https://broken.example"]
+    assert result.results[0].score == 0
+    assert [params["categories"] for _, params in client.calls] == ["it"]
 
 
 @pytest.mark.asyncio
-async def test_search_returns_empty_result_when_get_json_raises_value_error():
+async def test_search_reports_invalid_json():
     service = SearxngService(ErroringHttpClient(ValueError("bad json")), "http://example.com")
 
     result = await service.search("example article", category="general", limit=5)
 
     assert result.is_empty
+    assert result.error_code == "invalid_json"
 
 
 @pytest.mark.asyncio
-async def test_search_returns_empty_result_when_get_json_raises_type_error():
+async def test_search_reports_invalid_payload():
     service = SearxngService(ErroringHttpClient(TypeError("bad payload")), "http://example.com")
 
     result = await service.search("example article", category="general", limit=5)
 
     assert result.is_empty
+    assert result.error_code == "invalid_json"

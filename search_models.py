@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, List, Mapping
 
 
@@ -15,6 +16,12 @@ class SearchResultItem:
 
     @classmethod
     def from_mapping(cls, item: Mapping[str, Any]) -> "SearchResultItem":
+        try:
+            score = float(item.get("score", 0.0) or 0.0)
+            if not math.isfinite(score):
+                score = 0.0
+        except (ValueError, TypeError, OverflowError):
+            score = 0.0
         return cls(
             title=str(item.get("title", "")),
             url=str(item.get("url", "")),
@@ -23,7 +30,7 @@ class SearchResultItem:
             iframe_src=str(item.get("iframe_src", "")),
             content=str(item.get("content", "")),
             engine=str(item.get("engine", "")),
-            score=float(item.get("score", 0.0) or 0.0),
+            score=score,
         )
 
 
@@ -31,6 +38,8 @@ class SearchResultItem:
 class SearchResult:
     results: List[SearchResultItem] = field(default_factory=list)
     error_message: str = ""
+    error_code: str = ""
+    diagnostics: dict = field(default_factory=dict)
 
     def __iter__(self):
         return iter(self.results)
@@ -43,7 +52,7 @@ class SearchResult:
         return not self.results
 
     def limited(self, limit: int) -> "SearchResult":
-        return SearchResult(results=list(self.results[:limit]), error_message=self.error_message)
+        return replace(self, results=list(self.results[:limit]))
 
     @classmethod
     def from_iterable(cls, items: Iterable[Mapping[str, Any]]) -> "SearchResult":

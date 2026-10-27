@@ -53,6 +53,41 @@ accepts no endpoint/token/text overrides, and cannot be used by a chat member as
 If search still returns `unavailable` after a successful connection test, check search
 connectivity and content-size limits: those can also cause the content to be withheld.
 
+## Search failures and retry limits
+
+Search responses distinguish genuine `empty` results from `backend_request_failed`,
+`invalid_json`, `invalid_response`, `http_error`, `engine_failures`, `invalid_results`,
+`timeout` and local `plugin_error`. Safe diagnostics include HTTP status, raw result
+count, invalid-entry count and the number of unresponsive engines; backend response
+bodies, raw engine error messages, credentials and infrastructure URLs are not echoed.
+Engine failures plus zero results are inconclusive, not proof that no pages match.
+A bad score is normalised to zero; a malformed entry does not erase other valid results.
+
+One incoming message owns one search budget, shared by text and image categories:
+
+- `search_call_limit`: default 6, range 1–12.
+- `search_empty_limit`: default 3 consecutive genuine empty results, range 1–6.
+- `search_failure_limit`: default 2 backend failures, range 1–3.
+- Further search attempts after 90 seconds are rejected. Identical category/query
+  pairs are not requested again (case/whitespace-normalised).
+
+Claims happen before network awaits, including parallel tool calls. Limits stop new
+backend calls, not searches already running. Each category search can still perform
+its existing bounded category fallback internally. A new incoming event gets a new
+budget; these limits are not a deployment-wide circuit breaker.
+
+When the budget is blocked, tool output sets `stop_searching=true` and asks the model
+to explain the limitation using existing evidence. The plugin cannot force a model
+to stop invoking tools or generating text. Keep AstrBot's agent tool-round limit
+reasonable (for example 12); a per-request backend budget is complementary to it.
+Valid results and external error text still pass through optional Prompt Guard.
+Numeric diagnostic fields and static retry guidance never mark content trusted.
+
+Logs include a safe outcome summary so a future incident can distinguish backend
+failure, parsing failure, engine problems, filtering and genuine empty results.
+The earlier incident's exact backend failure cannot be reconstructed from its old
+empty-only responses; this release does not claim to have identified that root cause.
+
 ## Browser-compatible webpage fallback
 
 `browser_fallback_enabled` defaults to true. The existing `searxng_web_fetch_url`

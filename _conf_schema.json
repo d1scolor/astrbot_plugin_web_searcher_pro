@@ -52,5 +52,21 @@
     "default": true,
     "description": "Browser-compatible webpage fallback (curl_cffi)",
     "hint": "Retry blocked/challenged public webpages with a Chrome-compatible HTTP fingerprint. No JavaScript or CAPTCHA solving. All results still pass through optional Prompt Guard."
+  },
+  "search_call_limit": {
+    "type": "int",
+    "default": 6,
+    "description": "Maximum search calls per incoming request (1–12)",
+    "hint": "Shared across text/image categories. Further tool invocations do not contact the search backend."
+  },
+  "search_empty_limit": {
+    "type": "int",
+    "default": 3,
+    "description": "Consecutive empty searches before stopping (1–6)"
+  },
+  "search_failure_limit": {
+    "type": "int",
+    "default": 2,
+    "description": "Backend failures before stopping (1–3)"
   }
 }

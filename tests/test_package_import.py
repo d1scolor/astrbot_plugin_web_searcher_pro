@@ -258,7 +258,7 @@ def test_new_text_search_tools_forward_category_and_empty_message(monkeypatch):
         calls = []
 
         async def fake_search_text_category(
-            query: str, *, category: str, empty_message: str, limit: int = 5
+            query: str, *, category: str, empty_message: str, limit: int = 5, event=None
         ) -> str:
             calls.append((query, category, empty_message, limit))
             return f"forwarded:{category}"
@@ -356,7 +356,6 @@ def test_every_external_text_entrypoint_is_guarded(monkeypatch):
     plugin.web_fetch_service = types.SimpleNamespace(fetch=external)
     plugin.github_service = types.SimpleNamespace(search=external)
     plugin.aur_service = types.SimpleNamespace(search=external)
-    event = types.SimpleNamespace(plain_result=lambda text: text)
 
     async def invoke():
         tools = [
@@ -376,6 +375,7 @@ def test_every_external_text_entrypoint_is_guarded(monkeypatch):
             "search_github_repo",
         ]
         for name in tools:
+            event = types.SimpleNamespace(plain_result=lambda text: text)
             result = await getattr(plugin, name)(event, "query")
             assert '"screening": "blocked"' in result
             assert "UNTRUSTED_MARKER" not in result
