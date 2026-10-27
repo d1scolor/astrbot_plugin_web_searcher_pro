@@ -250,3 +250,25 @@ async def test_guard_never_sends_oversized_text(monkeypatch):
     monkeypatch.setattr(guard, "scan", forbidden)
     result = json.loads(await guard.review("x" * (MAX_TEXT_BYTES + 1)))
     assert result["screening"] == "unavailable"
+
+
+async def test_diagnostics_missing_configuration_and_busy():
+    result = await PromptGuard().diagnostics()
+    assert result["code"] == "configuration_missing"
+    guard = PromptGuard(base_url="http://guard.example")
+    async with guard.diagnostic_lock:
+        result = await guard.diagnostics()
+    assert result["code"] == "busy"
+
+
+async def test_diagnostics_reports_timeout(monkeypatch):
+    from astrbot_plugin_web_searcher_pro.services import prompt_guard
+
+    class SlowSession(Session):
+        def get(self, *args, **kwargs):
+            raise TimeoutError()
+
+    monkeypatch.setattr(prompt_guard.aiohttp, "ClientSession", lambda **kwargs: SlowSession([]))
+    result = await PromptGuard(base_url="http://guard.example").diagnostics()
+    assert result["code"] == "timeout"
+    assert result["checks"][-1]["stage"] == "health"

@@ -33,7 +33,7 @@
     "type": "string",
     "description": "Prompt Guard base URL",
     "default": "",
-    "hint": "Administrator-configured HTTP(S) base URL, without /v1/scan or credentials."
+    "hint": "Administrator-configured HTTP(S) base URL, without /v1/scan or credentials. Save/reload, then open the plugin Connection Test view to verify."
   },
   "guard_auth_token": {
     "type": "string",

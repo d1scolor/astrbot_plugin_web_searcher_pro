@@ -60,7 +60,7 @@ WEBSEARCH_TOOL_NAMES = (
     "web_searcher_pro",
     "buding",
     "更高性能的Web检索插件",
-    "1.2.0",
+    "1.2.1",
     "https://github.com/d1scolor/astrbot_plugin_web_searcher_pro",
 )
 class WebSearcherPro(Star):
@@ -90,6 +90,20 @@ class WebSearcherPro(Star):
         )
         self.web_fetch_service = WebFetchService(self.http_client, self.github_service)
         self.aur_service = AurService(self.http_client)
+        context.register_web_api(
+            "/astrbot_plugin_web_search_pro/guard/test",
+            self.test_guard_connection,
+            ["POST"],
+            "Test saved Prompt Guard connection settings",
+        )
+
+    async def test_guard_connection(self):
+        # This is an authenticated Dashboard API, never an LLM/chat tool.
+        from astrbot.api.web import error_response, json_response, request
+
+        if not request.username:
+            return error_response("Dashboard authentication required", status_code=403)
+        return json_response(await self.guard.diagnostics())
 
     def guard_unavailable(self):
         return self.guard.enabled and not self.guard.configured()

@@ -383,3 +383,25 @@ def test_every_external_text_entrypoint_is_guarded(monkeypatch):
     asyncio.run(invoke())
     assert len(scanned) == 16
     assert all("UNTRUSTED_MARKER" in text for text in scanned)
+
+
+def test_diagnostic_endpoint_requires_dashboard_identity(monkeypatch):
+    module = _import_plugin_main(monkeypatch)
+    web = types.ModuleType("astrbot.api.web")
+    web.request = types.SimpleNamespace(username=None)
+    web.json_response = lambda data, **kwargs: data
+    web.error_response = lambda message, **kwargs: {"error": message, "status_code": kwargs["status_code"]}
+    monkeypatch.setitem(sys.modules, "astrbot.api.web", web)
+    plugin = object.__new__(module.WebSearcherPro)
+    calls = []
+
+    async def diagnose():
+        calls.append(True)
+        return {"ok": True}
+
+    plugin.guard = types.SimpleNamespace(diagnostics=diagnose)
+    result = asyncio.run(plugin.test_guard_connection())
+    assert result["status_code"] == 403 and not calls
+    web.request.username = "dashboard-test-user"
+    assert asyncio.run(plugin.test_guard_connection()) == {"ok": True}
+    assert calls == [True]

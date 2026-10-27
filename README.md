@@ -2,7 +2,7 @@
 
 Fork of [WebSearcherPro by buding](https://github.com/zouyonghe/astrbot_plugin_web_searcher_pro),
 maintained here with public-network-only page fetching and optional Prompt Guard screening.
-Target: AstrBot 4.29.3, Python 3.11 or newer. Version 1.2.0.
+Target: AstrBot 4.29.3, Python 3.11 or newer. Version 1.2.1.
 
 ## Configure
 
@@ -33,6 +33,25 @@ This plugin does not modify global configuration or activate/deactivate tools.
 `/websearch` now only reports configuration; on/off arguments cannot change settings.
 Older `default_web_search_enabled`, image-delivery and GitHub-token settings are ignored.
 Administrator GitHub credentials are never used for chat-controlled repository queries.
+
+## Connection test in the Dashboard
+
+After saving configuration and reloading the plugin, open its detail page and select
+**Prompt Guard connection test / Prompt Guard 连接测试** under plugin Views. Click
+**Test connection**. No extra service or port is required.
+
+The test uses loaded/saved settings, not unsaved form values. It checks `/health`,
+authenticated `/ready`, then `/v1/scan` using one fixed harmless sentence. It works
+with `guard_enabled=false`, so connectivity can be checked before enabling screening.
+Results identify authentication errors, missing endpoints, redirects, timeouts,
+connection/TLS failures and incompatible response formats. The token and raw server
+bodies are never returned to the browser. A flagged probe is reported separately from
+a connection failure. Diagnostic success does not certify detector accuracy.
+
+The test endpoint is a POST-only authenticated Dashboard API. It is not an LLM tool,
+accepts no endpoint/token/text overrides, and cannot be used by a chat member as a proxy.
+If search still returns `unavailable` after a successful connection test, check search
+connectivity and content-size limits: those can also cause the content to be withheld.
 
 ## Behavior
 
